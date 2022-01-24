@@ -23,7 +23,7 @@ const (
 const (
 	maskType   byte = 0xF0
 	maskFlags  byte = 0x0F
-	maskQoS    byte = 0x06
+	maskQos    byte = 0x06
 	maskDup    byte = 0x08
 	maskRetain byte = 0x01
 )

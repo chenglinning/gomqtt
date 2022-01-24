@@ -1,9 +1,11 @@
 package mqttp
 
 import (
+	"fmt"
+	"io"
+	"bytes"
 	"encoding/binary"
 	"unicode/utf8"
-	"io"
 )
 
 const (
@@ -157,11 +159,10 @@ var propertyAllowedMessageTypes = map[uint32]map[byte]bool{
 // DupAllowed check if property id allows keys duplication
 func DupAllowedProperty(ppid uint32, t byte) bool {
 	d, ok := propertyAllowedMessageTypes[ppid]
-	if !ok {
-		return false
+	if ok {
+		return d[t]
 	}
-
-	return d[t]
+	return false
 }
 
 // IsValid check if property id is valid spec value
@@ -219,19 +220,72 @@ func UnpackProps(t byte, r io.Reader) (map[uint32]interface{}, error) {
 		if !IsValidPacketType4Prop(ppid, t) {
 			return nil, errors.New(fmt.Sprintf("Invalid Property ID: 0x%04X Packet type: 0x%02X", ppid, t))
 		}
+
 		propLen -= vlen(ppid)
-		val := ReadPropVal(r, ppid)
-		props[ppid] = val
+
+		pptype, err := GetPropertyType(ppid)
+		if err != nil {
+			return nil, err
+		}
+		val, err := ReadPropVal(r, pptype)
+		if err != nil {
+			return nil, err
+		}
+
+		dup := DupAllowedProperty(ppid, t)
+		switch pptype {
+		case One_Byte:
+			props[ppid] = val.(byte)
+			proplen -= 1
+
+		case Two_Byte_Integer:
+			props[ppid] = val.(uint16)
+			proplen -= 2
+
+		case Four_Byte_Integer:
+			props[ppid] = val.(uint32)
+			proplen -= 4
+
+		case Variable_Byte_Integer:
+			if dup {
+				if _, ok = props[ppid]; ok {
+					props[ppid] = append(props[ppid].([]uint32), val.(uint32))
+				} else {
+					props[ppid] = []uint32{val.(uint32)}
+				}
+			} else {
+				props[ppid] = val.(uint32)
+			}
+
+			proplen -= vlen(val.(uint32))
+
+		case UTF8_String:
+			props[ppid] = val.(string)
+			proplen -= (2 + len(val.(string)))
+
+		case UTF8_String_Pair:
+			if dup {
+				if _, ok = props[ppid]; ok {
+					props[ppid] = append(props[ppid].([]StringPair), val.(StringPair))
+				} else {
+					props[ppid] = []StringPair{val.(StringPair)}
+				}
+			} else {
+				props[ppid] = val.(StringPair)
+			}
+
+			proplen -= (4 + len(val.(StringPair).k) + len(val.(StringPair).v))
+
+		case Binary_Data:
+			props[ppid] = val.([]byte)
+			proplen -= (2 + len(val.(byte)))
+		}
 	}
 
 	return ppros, 0, nil
 }
 
-func ReadPropVal(r io.Reader, ppid uint32) (interface{}, error) {
-	pptype, err := GetPropertyType(ppid)
-	if err != nil {
-		return nil, err
-	}
+func ReadPropVal(r io.Reader, pptype byte) (interface{}, error) {
 	switch pptype {
 	case One_Byte:
 		v, err := ReadByte(r)
@@ -250,503 +304,106 @@ func ReadPropVal(r io.Reader, ppid uint32) (interface{}, error) {
 	default:
 		v, err := nil, errors.New("Invalid property data type")
 	}
-
 	return v, err
 }
 
-func (p *property) encode(to []byte) (int, error) {
-	pLen := p.FullLen()
-	if pLen > len(to) {
-		return 0, ErrInsufficientBufferSize
+func PackProps(t byte, props map[uint32]interface{}) ([]byte, error) {
+	wbuff := bytes.NewBuffer([]byte{})
+
+	for ppid, val := range props {
+		dup := DupAllowedProperty(ppid, t)
+		if dup {
+			err := WriteDupProp(wbuff, ppid, val)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			err := WriteProp(wbuff, ppid, val)
+			if err != nil {
+				return nil, err
+			}
+ 	    }
 	}
 
-	if pLen == 1 {
-		return 1, nil
-	}
-
-	var offset int
-	var err error
-	// Encode variable length header
-	total := binary.PutUvarint(to, uint64(p.len))
-
-	for k, v := range p.properties {
-		fn := propertyEncodeType[propertyTypeMap[k]]
-		offset, err = fn(k, v, to[total:])
-		total += offset
-
-		if err != nil {
-			break
-		}
-	}
-
-	return total, err
+	return wbuff.Bytes(), nil
 }
 
-func calcLenByte(id PropertyID, val interface{}) (int, error) {
-	l := 0
-	calc := func() int {
-		return 1 + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case uint8:
-		l = calc()
-	case []uint8:
-		for range valueType {
-			l += calc()
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenShort(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func() int {
-		return 2 + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case uint16:
-		l = calc()
-	case []uint16:
-		for range valueType {
-			l += calc()
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenInt(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func() int {
-		return 4 + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case uint32:
-		l = calc()
-	case []uint32:
-		for range valueType {
-			l += calc()
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenVarInt(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func(v uint32) int {
-		return uvarintCalc(v) + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case uint32:
-		l = calc(valueType)
-	case []uint32:
-		for _, v := range valueType {
-			l += calc(v)
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenString(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func(n int) int {
-		return 2 + n + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case string:
-		l = calc(len(valueType))
-	case []string:
-		for _, v := range valueType {
-			l += calc(len(v))
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenBinary(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func(n int) int {
-		return 2 + n + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case []byte:
-		l = calc(len(valueType))
-	case [][]string:
-		for _, v := range valueType {
-			l += calc(len(v))
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func calcLenStringPair(id PropertyID, val interface{}) (int, error) {
-	l := 0
-
-	calc := func(k, v int) int {
-		return 4 + k + v + uvarintCalc(uint32(id))
-	}
-
-	switch valueType := val.(type) {
-	case StringPair:
-		l = calc(len(valueType.K), len(valueType.V))
-	case []StringPair:
-		for _, v := range valueType {
-			l += calc(len(v.K), len(v.V))
-		}
-	default:
-		return 0, nil
-	}
-
-	return l, nil
-}
-
-func decodeByte(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-	if len(from[offset:]) < 1 {
-		return offset, CodeMalformedPacket
-	}
-
-	p.properties[id] = from[offset]
-	offset++
-
-	return offset, nil
-}
-
-func decodeShort(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-	if len(from[offset:]) < 2 {
-		return offset, CodeMalformedPacket
-	}
-
-	v := binary.BigEndian.Uint16(from[offset:])
-	offset += 2
-
-	p.properties[id] = v
-
-	return offset, nil
-}
-
-func decodeInt(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-	if len(from[offset:]) < 4 {
-		return offset, CodeMalformedPacket
-	}
-
-	v := binary.BigEndian.Uint32(from[offset:])
-	offset += 4
-
-	p.properties[id] = v
-
-	return offset, nil
-}
-
-func decodeVarInt(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-
-	v, cnt := uvarint(from[offset:])
-	if cnt <= 0 {
-		return offset, CodeMalformedPacket
-	}
-	offset += cnt
-
-	p.properties[id] = v
-
-	return offset, nil
-}
-
-func decodeString(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-
-	v, n, err := ReadLPBytes(from[offset:])
-	if err != nil || !utf8.Valid(v) {
-		return offset, CodeMalformedPacket
-	}
-
-	offset += n
-
-	p.properties[id] = string(v)
-
-	return offset, nil
-}
-
-func decodeStringPair(p *property, id PropertyID, from []byte) (int, error) {
-	var k []byte
-	var v []byte
-	var n int
-	var err error
-
-	k, n, err = ReadLPBytes(from)
-	offset := n
-	if err != nil || !utf8.Valid(k) {
-		return offset, CodeMalformedPacket
-	}
-
-	v, n, err = ReadLPBytes(from[offset:])
-	offset += n
-
-	if err != nil || !utf8.Valid(v) {
-		return offset, CodeMalformedPacket
-	}
-
-	if _, ok := p.properties[id]; !ok {
-		p.properties[id] = []StringPair{}
-	}
-
-	p.properties[id] = append(p.properties[id].([]StringPair), StringPair{K: string(k), V: string(v)})
-
-	return offset, nil
-}
-
-func decodeBinary(p *property, id PropertyID, from []byte) (int, error) {
-	offset := 0
-
-	b, n, err := ReadLPBytes(from[offset:])
+func WriteProp(w io.Writer, ppid uint32, v interface{}) error {
+	pptype, err := GetPropertyType(ppid)
 	if err != nil {
-		return offset, CodeMalformedPacket
+		return err
 	}
-	offset += n
 
-	tmp := make([]byte, len(b))
+	// write property ID 
+	err = WriteUvarint(w, ppid)
+	if err != nil {
+		return err
+	}
 
-	copy(tmp, b)
+	// write property value
+	switch pptype {
+	case One_Byte:
+		err = WriteByte(w, v.(byte))
 
-	p.properties[id] = tmp
+	case Two_Byte_Integer:
+		err = WriteUint16(w, v.(uint16))
 
-	return offset, nil
+	case Four_Byte_Integer:
+		err = WriteUint32(w, v.(uint32))
+
+	case Variable_Byte_Integer:
+		err = WriteUvarint(w, v.(uint32))
+
+	case UTF8_String:
+		err = WriteString(w, v.(string))
+
+	case UTF8_String_Pair:
+		err = WriteStringPair(w, v.(StringPair))
+
+	case Binary_Data:
+		err = WriteBinaryData(w, v.([]byte))
+	}
+
+	return err
 }
 
-func encodeByte(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v uint8, to []byte) int {
-		off := writePrefixID(id, to)
-
-		to[off] = v
-		off++
-
-		return off
+func WriteDupProp(w io.Writer, ppid uint32, v interface{}) error {
+	pptype, err := GetPropertyType(ppid)
+	if err != nil {
+		return err
 	}
 
-	switch valueType := val.(type) {
-	case uint8:
-		offset += encode(valueType, to[offset:])
-	case []uint8:
-		for _, v := range valueType {
-			offset += encode(v, to[offset:])
-		}
-	default:
-		panic("unexpected property type")
+	if ppid != Subscription_Identifier && ppid != User_Property {
+		return errors.New(fmt.Sprintf("Not allow duplicate. Property ID: 0x%04X", ppid))
 	}
 
-	return offset, nil
-}
-
-func encodeShort(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v uint16, to []byte) int {
-		off := writePrefixID(id, to)
-		binary.BigEndian.PutUint16(to[off:], v)
-		off += 2
-
-		return off
-	}
-
-	switch valueType := val.(type) {
-	case uint16:
-		offset += encode(valueType, to[offset:])
-	case []uint16:
-		for _, v := range valueType {
-			offset += encode(v, to[offset:])
-		}
-	default:
-		panic("unexpected property type")
-	}
-
-	return offset, nil
-}
-
-func encodeInt(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v uint32, to []byte) int {
-		off := writePrefixID(id, to)
-		binary.BigEndian.PutUint32(to[off:], v)
-		off += 4
-
-		return off
-	}
-
-	switch valueType := val.(type) {
-	case uint32:
-		offset += encode(valueType, to[offset:])
-	case []uint32:
-		for _, v := range valueType {
-			offset += encode(v, to[offset:])
-		}
-	default:
-		panic("unexpected property type")
-	}
-
-	return offset, nil
-}
-
-func encodeVarInt(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v uint32, to []byte) int {
-		off := writePrefixID(id, to)
-		off += binary.PutUvarint(to[off:], uint64(v))
-
-		return off
-	}
-
-	switch valueType := val.(type) {
-	case uint32:
-		offset += encode(valueType, to[offset:])
-	case []uint32:
-		for _, v := range valueType {
-			offset += encode(v, to[offset:])
-		}
-	default:
-		panic("unexpected property type")
-	}
-
-	return offset, nil
-}
-
-func encodeString(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v string, to []byte) (int, error) {
-		off := writePrefixID(id, to)
-		count, err := WriteLPBytes(to[off:], []byte(v))
-		off += count
-
-		return off, err
-	}
-
-	switch valueType := val.(type) {
-	case string:
-		n, err := encode(valueType, to[offset:])
-		offset += n
-		if err != nil {
-			return offset, err
-		}
-	case []string:
-		for _, v := range valueType {
-			n, err := encode(v, to[offset:])
-			offset += n
+	if ppid == Subscription_Identifier { //  Variable_Byte_Integer
+		for i, vi := range v.([]uint32) {
+			// write property id
+			err = WriteUvarint(w, ppid)
 			if err != nil {
-				return offset, err
+				return err
 			}
-		}
-	default:
-		panic("unexpected property type")
-	}
-
-	return offset, nil
-}
-
-func encodeStringPair(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v StringPair, to []byte) (int, error) {
-		off := writePrefixID(id, to)
-
-		n, err := WriteLPBytes(to[off:], []byte(v.K))
-		off += n
-		if err != nil {
-			return off, err
-		}
-
-		n, err = WriteLPBytes(to[off:], []byte(v.V))
-		off += n
-		if err != nil {
-			return off, err
-		}
-
-		return off, nil
-	}
-
-	switch valueType := val.(type) {
-	case StringPair:
-		n, err := encode(valueType, to[offset:])
-		offset += n
-		if err != nil {
-			return offset, err
-		}
-	case []StringPair:
-		for _, v := range valueType {
-			n, err := encode(v, to[offset:])
-			offset += n
+			// write property value
+			err = WriteUvarint(w, vi)
 			if err != nil {
-				return offset, err
+				return err
 			}
-		}
-	default:
-		panic("unexpected property type")
-	}
-
-	return offset, nil
-}
-
-func encodeBinary(id PropertyID, val interface{}, to []byte) (int, error) {
-	offset := 0
-
-	encode := func(v []byte, to []byte) (int, error) {
-		off := writePrefixID(id, to)
-		count, err := WriteLPBytes(to[off:], v)
-		off += count
-
-		return off, err
-	}
-
-	switch valueType := val.(type) {
-	case []byte:
-		n, err := encode(valueType, to[offset:])
-		offset += n
-		if err != nil {
-			return offset, err
-		}
-	case [][]byte:
-		for _, v := range valueType {
-			n, err := encode(v, to[offset:])
-			offset += n
+		} 
+	} else { // User_Property
+		for i, vi := range v.([]StringPair) {
+			// write property id
+			err = WriteUvarint(w, ppid)
 			if err != nil {
-				return offset, err
+				return err
 			}
-		}
-	default:
-		panic("unexpected property type")
+			// write property id
+			err = WriteStringPair(w, vi)
+			if err != nil {
+				return err
+			}
+		} 
 	}
-	return offset, nil
+
+	return nil
 }

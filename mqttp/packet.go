@@ -2,6 +2,8 @@ package mqttp
 
 import (
 	"fmt"
+	"bytes"
+	"io"
 )
 
 const (
