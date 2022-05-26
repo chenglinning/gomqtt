@@ -1,6 +1,7 @@
 package mqttp
 
 import (
+	"github.com/wonderivan/logger"
 	"fmt"
 	"bytes"
 	"io"
@@ -18,8 +19,9 @@ const (
 )
 
 type Packet interface {
-	Pack(io.Writer) error
-	Unpack(io.Reader) error
+	Pack() (byte[], error)
+	Unpack(rdata byte[]) error
+
 	String() string
 
 	GetVersion() byte
@@ -40,64 +42,73 @@ type Packet interface {
 	IsRetain() bool
 	SetRetain(b bool)
 
-	GetRemLen() int32
-	SetRemLen(l int32)
+//	GetRemLen() int32
+//	SetRemLen(l int32)
 
 	GetFixedHeaderFirstByte() byte
-	SetFlags(flags byte) 
+	ParseFlags(flags byte) 
 
 	ResetProps()
 	ResetWillProps()
 
-	PackProps(io.Writer) error
-	UnpackProps(io.Reader) error
+	WriteProps(io.Writer) error
+	ReadProps(io.Reader) error
 
-	PackWillProps(io.Writer) error
-	UnpackWillProps(io.Reader) error
+	WriteWillProps(io.Writer) error
+	ReadWillProps(io.Reader) error
 
 }
 
-func NewPacket(v byte, t byte, flags byte) (Packet, error) {
+func NewPacket(v byte, t PKType, flags byte) (Packet, error) {
 	var p Packet
 	switch t {
 	case CONNECT:
-		p = NewConnect(v, flags)
+		p = NewConnect()
 	case CONNACK:
-		p = NewConnAck(v, flags)
+		p = NewConnAck()
 	case PUBLISH:
-		p = NewPublish(v, flags)
+		p = NewPublish()
 	case PUBACK:
-		p = NewPubAck(v, flags)
+		p = NewPubAck()
 	case PUBREC:
-		p = NewPubRec(v, flags)
+		p = NewPubRec()
 	case PUBREL:
-		p = NewPubRel(v, flags)
+		p = NewPubRel()
 	case PUBCOMP:
-		p = NewPubComp(v, flags)
+		p = NewPubComp()
 	case SUBSCRIBE:
-		p = NewSubscribe(v, flags)
+		p = NewSubscribe()
 	case SUBACK:
-		p = NewSubAck(v, flags)
+		p = NewSubAck()
 	case UNSUBSCRIBE:
-		p = NewUnSubscribe(v, flags)
+		p = NewUnSubscribe()
 	case UNSUBACK:
-		p = NewUnSubAck(v, flags)
+		p = NewUnSubAck()
 	case PINGREQ:
-		p = NewPingReq(v, flags)
+		p = NewPingReq()
 	case PINGRESP:
-		p = NewPingResp(v, flags)
+		p = NewPingResp()
 	case DISCONNECT:
-		p = NewDisconnect(v, flags)
+		p = NewDisconnect()
 	case AUTH:
 		if v < MQTT50 {
 			return nil, ErrInvalidMessageType
 		}
-		p = NewAuth(v)
+		p = NewAuth()
 	default:
 		return nil, ErrInvalidMessageType
 	}
-	
-	p.setType(t)
+
+	if t != PUBLISH {
+		dflags := DefaultFlags(t)
+		if flags != dflags {
+			return nil, ErrMalformedStream
+		}
+	} 
+
+	p.SetType(t)
+	p.ParseFlags(flags)
+	p.SetVersion(v)
 
 	return p, nil
 }
@@ -109,50 +120,67 @@ func NewPacket(v byte, t byte, flags byte) (Packet, error) {
 func ReadPacket(r io.Reader) (Packet, error) {
 	buffer := make([]byte, 1)
 	_, err := io.ReadFull(r, buffer)
+	
 	if err != nil {
-		return nil, err
+		logger.Error(err.Error())
+		return nil, CodeMalformedPacket
 	}
 
-	pktype := buffer[0] & maskType >> 4
+	pktype := PKType(buffer[0] & maskType >> 4)
 	flags :=  buffer[0] & maskFlags
 
 	remLen, err := ReadUvarint(r)
 	if err != nil {
+		logger.Error(err.Error())
+		return nil, CodeMalformedPacket
+	}
+
+	pkt, err := NewPacket(TBD, pktype, flags)
+
+	if err != nil {
+		logger.Error(err.Error())
 		return nil, err
 	}
 
-	pkt, err := NewPacket(TBD, pktype)
+	rdata := make([]byte, remLen)
+	n, err := io.ReadFull(r, rdata)
 	if err != nil {
-		return nil, err
-	}
-
-	packetBytes := make([]byte, remLen)
-	n, err := io.ReadFull(r, packetBytes)
-	if err != nil {
-		return nil, err
+		logger.Error(err.Error())
+		return nil, CodeMalformedPacket
 	}
 	if n != remLen {
-		return nil, errors.New("failed to read expected data")
+		logger.Error("failed to read remained data")
+		return nil, CodeMalformedPacket
 	}
 
-	err = pkt.Unpack(bytes.NewBuffer(packetBytes))
+	err = pkt.Unpack(rdata)
 
 	return pkt, err
 }
 
 func WritePacket(w io.Writer, pkt Packet) error {
-	buff := bytes.NewBuffer([]byte{})
-	err := pkt.Packet(buff)
+	data, err := pkt.Pack()
 	if err != nil {
 		return err
 	}
-	m, err := w.Write(buff.Bytes())
-	return err
-}
 
-// ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
-// considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
-// such as + and #.
-func ValidTopic(topic []byte) bool {
-	return IsValidUTF(topic) && TopicPublishRegexp.Match(topic)
+	// fixed header 1th byte
+	fh := pkt.GetFixedHeaderFirstByte()
+	err = WriteByte(w, fh)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error encoding fixed header: %s", err))
+		return err
+	}
+
+	// fixed remaining lenght field
+	remlen := len(data)
+	err = WriteUvarint(w, uint32(remlen))
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error encoding remianing lenght: %s", err))
+		return err
+	}
+	
+	// data
+	m, err := w.Write(data)
+	return err
 }

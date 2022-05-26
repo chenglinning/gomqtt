@@ -1,15 +1,21 @@
 package mqttp
 
-const PRONAME string = "MQTT"
+type PKType byte
 
+const PRONAME string = "MQTT"
 const (
 	TBD		byte = 0
 	MQTT311 byte = 4
 	MQTT50  byte = 5
 )
+const (
+	QoS0 byte = 0
+	QoS1 byte = 1
+	QoS2 byte = 2
+)
 
 const (
-	RESERVED byte = iota
+	RESERVED PKType = iota
 	CONNECT
 	CONNACK
 	PUBLISH
@@ -27,9 +33,29 @@ const (
 	AUTH
 )
 
+var (
+	// TopicFilterRegexp regular expression that all subscriptions must be validated
+	TopicFilterRegexp = regexp.MustCompile(`^(([^+#]*|\+)(/([^+#]*|\+))*(/#)?|#)$`)
+
+	// TopicPublishRegexp regular expression that all publish to topic must be validated
+	TopicPublishRegexp = regexp.MustCompile(`^[^#+]*$`)
+
+	// SharedTopicRegexp regular expression that all share subscription must be validated
+	SharedTopicRegexp = regexp.MustCompile(`^\$share/([^#+/]+)(/)(.+)$`)
+
+	// BasicUTFRegexp regular expression all MQTT strings must meet [MQTT-1.5.3]
+	BasicUTFRegexp = regexp.MustCompile("^[^\u0000-\u001F\u007F-\u009F]*$")
+)
+
+var dollarPrefix = []byte("$")
+var sharePrefix = []byte("$share")
+var topicSep = []byte("/")
+
+
 // PacketNames maps the constants for each of the MQTT packet types
 // to a string representation of their name.
-var PacketNames = map[byte]string{
+var PacketNames = map[PKType]string{
+	0:  "RESERVED",
 	1:  "CONNECT",
 	2:  "CONNACK",
 	3:  "PUBLISH",
@@ -67,17 +93,61 @@ var typeDefaultFlags = [AUTH + 1]byte {
 	0, // AUTH
 }
 
-func PacketName(t byte) string {
+func (t PKType) Name() string {
 	if t > AUTH {
 		return "UNKNOWN"
 	}
 	return PacketNames[t]
 }
 
+func (t PKType) ToByte() byte {
+	return byte(t)
+}
+
 // DefaultFlags returns the default flag values for the message type, as defined by the MQTT spec.
-func DefaultFlags(t byte) byte {
+func (t PKType) DefaultFlags() byte {
 	if t > AUTH {
 		return 0
 	}
 	return typeDefaultFlags[t]
+}
+
+func IsValidUTF(b []byte) bool {
+	return utf8.Valid(b) && BasicUTFRegexp.Match(b)
+}
+
+func IsValidString(s string) bool {
+	return utf8.ValidString(s) && BasicUTFRegexp.MatchString(s)
+}
+
+func IsValidTopic(s string) bool {
+	return utf8.ValidString(s) && BasicUTFRegexp.MatchString(s) && TopicPublishRegexp.MatchString(s)
+}
+
+type SubOptions byte
+
+// QoS quality of service
+func (s SubOps) QoS() byte {
+	return byte(s) & maskSubscriptionQoS
+}
+
+// Raw just return byte
+func (s SubOps) Raw() byte {
+	return byte(s)
+}
+
+// NL No Local option
+// V5.0 ONLY
+func (s SubOps) NL() bool {
+	return (byte(s) & maskSubscriptionNL) != 0
+}
+
+// V5.0 ONLY
+func (s SubOps) RAP() bool {
+	return (byte(s) & maskSubscriptionRAP) != 0
+}
+
+// V5.0 ONLY
+func (s SubOps) RetainHandling() byte {
+	return (byte(s) & maskSubscriptionRetainHandling) >> 4
 }

@@ -1,6 +1,7 @@
 package mqttp
 
 import (
+	"github.com/wonderivan/logger"
 	"fmt"
 	"io"
 	"bytes"
@@ -8,8 +9,20 @@ import (
 	"unicode/utf8"
 )
 
+// PropertyID id as per [MQTT-2.2.2]
+type PropertyID uint32
+type PropertyValue interface{}
+type PropertyMap map[PropertyID] PropertyValue
+
+type PropertySet struct {
+	props propertyTypeMap
+} 
+
+// PropertyError encodes property error
+type PropertyError int
+
 const (
-	One_Byte                = iota
+	One_Byte               byte = iota
 	Two_Byte_Integer
 	Four_Byte_Integer
 	Variable_Byte_Integer
@@ -19,36 +32,36 @@ const (
 )
 
 const (
-	Payload_Format_Indicator        		= uint32 (0x01)
-	Message_Expiry_Interval         		= uint32 (0x02)
-	Content_Type                    		= uint32 (0x03)
-	Response_Topic                  		= uint32 (0x08)
-	Correlation_Data                		= uint32 (0x09)
-	Subscription_Identifier         		= uint32 (0x0B)
-	Session_Expiry_Interval		            = uint32 (0x11)
-	Assigned_Client_Identifier              = uint32 (0x12)
-	Server_Keep_Alive                       = uint32 (0x13)
-	Authentication_Method                   = uint32 (0x15)
-	Authentication_Data                     = uint32 (0x16)
-	Request_Problem_Information             = uint32 (0x17)
-	Will_Delay_Interval                     = uint32 (0x18)
-	Request_Response_Information            = uint32 (0x19)
-	Response_Information                    = uint32 (0x1A)
-	Server_Reference                        = uint32 (0x1C)
-	Reason_String                           = uint32 (0x1F)
-	Receive_Maximum                         = uint32 (0x21)
-	Topic_Alias_Maximum                     = uint32 (0x22)
-	Topic_Alias                             = uint32 (0x23)
-	Maximum_QoS                             = uint32 (0x24)
-	Retain_Available                        = uint32 (0x25)
-	User_Property                           = uint32 (0x26)
-	Maximum_Packet_Size                     = uint32 (0x27)
-	Wildcard_Subscription_Available         = uint32 (0x28)
-	Subscription_Identifier_Available       = uint32 (0x29)
-	Shared_Subscription_Available           = uint32 (0x2A)
+	Payload_Format_Indicator        		= PropertyID (0x01)
+	Message_Expiry_Interval         		= PropertyID (0x02)
+	Content_Type                    		= PropertyID (0x03)
+	Response_Topic                  		= PropertyID (0x08)
+	Correlation_Data                		= PropertyID (0x09)
+	Subscription_Identifier         		= PropertyID (0x0B)
+	Session_Expiry_Interval		            = PropertyID (0x11)
+	Assigned_Client_Identifier              = PropertyID (0x12)
+	Server_Keep_Alive                       = PropertyID (0x13)
+	Authentication_Method                   = PropertyID (0x15)
+	Authentication_Data                     = PropertyID (0x16)
+	Request_Problem_Information             = PropertyID (0x17)
+	Will_Delay_Interval                     = PropertyID (0x18)
+	Request_Response_Information            = PropertyID (0x19)
+	Response_Information                    = PropertyID (0x1A)
+	Server_Reference                        = PropertyID (0x1C)
+	Reason_String                           = PropertyID (0x1F)
+	Receive_Maximum                         = PropertyID (0x21)
+	Topic_Alias_Maximum                     = PropertyID (0x22)
+	Topic_Alias                             = PropertyID (0x23)
+	Maximum_QoS                             = PropertyID (0x24)
+	Retain_Available                        = PropertyID (0x25)
+	User_Property                           = PropertyID (0x26)
+	Maximum_Packet_Size                     = PropertyID (0x27)
+	Wildcard_Subscription_Available         = PropertyID (0x28)
+	Subscription_Identifier_Available       = PropertyID (0x29)
+	Shared_Subscription_Available           = PropertyID (0x2A)
 )
 
-var propertyTypeMap = map[uint32] byte {
+var propertyTypeMap = map[PropertyID] byte {
 	Payload_Format_Indicator:			One_Byte
 	Message_Expiry_Interval:            Four_Byte_Integer
 	Content_Type:                    	UTF8_String
@@ -121,7 +134,7 @@ type StringPair struct {
 
 // propertyAllowedMessageTypes properties and their supported packets type.
 // bool flag indicates either duplicate allowed or not
-var propertyAllowedMessageTypes = map[uint32]map[byte]bool{
+var propertyAllowedMessageTypes = map[PropertyID]map[byte]bool{
 	Payload_Format_Indicator:            {PUBLISH: false},
 	Message_Expiry_Interval:             {PUBLISH: false},
 	Content_Type:                        {PUBLISH: false},
@@ -157,7 +170,7 @@ var propertyAllowedMessageTypes = map[uint32]map[byte]bool{
 }
 
 // DupAllowed check if property id allows keys duplication
-func DupAllowedProperty(ppid uint32, t byte) bool {
+func MultiAllowedProperty(ppid PropertyID, t byte) bool {
 	d, ok := propertyAllowedMessageTypes[ppid]
 	if ok {
 		return d[t]
@@ -166,7 +179,7 @@ func DupAllowedProperty(ppid uint32, t byte) bool {
 }
 
 // IsValid check if property id is valid spec value
-func IsValidProperty(ppid uint32) bool {
+func IsValidProperty(ppid PropertyID) bool {
 	if _, ok := propertyTypeMap[ppid]; ok {
 		return true
 	}
@@ -174,115 +187,131 @@ func IsValidProperty(ppid uint32) bool {
 }
 
 // Get Property data type
-func GetPropertyType(ppid uint32) (byte, error) {
+func GetPropertyType(ppid PropertyID) (byte, error) {
 	if t, ok := propertyTypeMap[ppid]; ok {
 		return t, nil
 	}
 	return 0, errors.New(fmt.Sprintf("Invalid Property ID: 0x%04X", ppid))
 }
 
+// Get Property data lenght
+func GetPropertyLength(pptype byte, val PropertyValue) int {
+	var pplen int
+	switch pptype {
+	case One_Byte:
+		pplen = 1
+	case Two_Byte_Integer:
+		pplen = 2
+	case Four_Byte_Integer:
+		pplen = 4
+	case Variable_Byte_Integer:
+		pplen -= vlen(val.(uint32))
+	case UTF8_String:
+		pplen = (2 + len(val.(string)))
+	case UTF8_String_Pair:
+		pplen = (4 + len(val.(StringPair).k) + len(val.(StringPair).v))
+	case Binary_Data:
+		pplen -= (2 + len(val.([]byte)))
+    }
+	return pplen
+}
+
 // IsValidPacketType check either property id can be used for given packet type
-func IsValidPacketType4Prop(ppid uint32, t byte) bool {
+func IsValidPacketType4Prop(ppid PropertyID, t byte) bool {
 	mT, ok := propertyAllowedMessageTypes[ppid]
 	if !ok {
 		return false
 	}
-	if _, ok = mT[t]; !ok {
-		return false
+
+	if _, ok = mT[t]; ok {
+		return true
 	}
-	return true
+
+	return false
+}
+
+// reset PropertySet
+func (this *PropertySet) Reset() {
+	this.props = make(PropertyMap)
 }
 
 // Set property value
-func SetProperty(props map[uint32]interface{}, t byte, ppid uint32 , val interface{}) error {
+func (this *PropertySet) SetProperty(t PKType, id PropertyID , val PropertyValue) error {
 	if mT, ok := propertyAllowedMessageTypes[id]; !ok {
 		return ErrPropertyInvalidID
 	} else if _, ok = mT[t]; !ok {
-		return ErrPropertyPacketTypeMismatch
+		return CodeProtocolError
 	}
-	p.properties[id] = val
+	dup := MultiAllowedProperty(id, t)
+	if dup {
+		if _, ok = this.props[id]; ok {
+			this.props[id] = append(this.props[id], val)
+		} else {
+			this.props[id] = make([]PropertyValue,0)
+		}
+	} else {
+		if _, ok = this.props[id]; ok {
+			return CodeProtocolError
+		}
+		this.props[ppid] = val
+	}
+
 	return nil
 }
 
-func UnpackProps(t byte, r io.Reader) (map[uint32]interface{}, error) {
-	props = make(map[uint32]interface{})
+// Get property value
+func (this *PropertySet) GetProperty(id PropertyID) PropertyValue {
+	if v, ok := this.props[id]; !ok {
+		return nil
+	} 
+	return v
+}
+
+func (this *PropertySet) UnpackProps(r io.Reader, t PKType) error {
+	this.Reset()
+
 	ulen, err := ReadUvarint(r)
 	if err != nil {
-		return nil, err
+		logger.Error("Error parsing properties lenght")
+		return nil, ErrMalformedStream
 	}
 
 	proplen := int(ulen)
 	for propLen > 0 {
 		ppid, err := ReadUvarint(r)
 		if err != nil {
+			logger.Error("Error parsing property ID")
 			return nil, err
 		}
 		if !IsValidPacketType4Prop(ppid, t) {
-			return nil, errors.New(fmt.Sprintf("Invalid Property ID: 0x%04X Packet type: 0x%02X", ppid, t))
+			logger.Error(fmt.Sprintf("Invalid PropertyID: 0x%04X Packet type: 0x%02X", ppid, t))
+			return nil, ErrMalformedStream
 		}
 
 		propLen -= vlen(ppid)
 
 		pptype, err := GetPropertyType(ppid)
 		if err != nil {
+			logger.Error(fmt.Sprintf("Invalid Property pptype of PropertyID : 0x%04X Packet type: 0x%02X", ppid, t))
 			return nil, err
 		}
+
 		val, err := ReadPropVal(r, pptype)
+
 		if err != nil {
+			logger.Error(fmt.Sprintf("Error read property value (pptye: 0x%02x)", pptype))
 			return nil, err
 		}
 
-		dup := DupAllowedProperty(ppid, t)
-		switch pptype {
-		case One_Byte:
-			props[ppid] = val.(byte)
-			proplen -= 1
-
-		case Two_Byte_Integer:
-			props[ppid] = val.(uint16)
-			proplen -= 2
-
-		case Four_Byte_Integer:
-			props[ppid] = val.(uint32)
-			proplen -= 4
-
-		case Variable_Byte_Integer:
-			if dup {
-				if _, ok = props[ppid]; ok {
-					props[ppid] = append(props[ppid].([]uint32), val.(uint32))
-				} else {
-					props[ppid] = []uint32{val.(uint32)}
-				}
-			} else {
-				props[ppid] = val.(uint32)
-			}
-
-			proplen -= vlen(val.(uint32))
-
-		case UTF8_String:
-			props[ppid] = val.(string)
-			proplen -= (2 + len(val.(string)))
-
-		case UTF8_String_Pair:
-			if dup {
-				if _, ok = props[ppid]; ok {
-					props[ppid] = append(props[ppid].([]StringPair), val.(StringPair))
-				} else {
-					props[ppid] = []StringPair{val.(StringPair)}
-				}
-			} else {
-				props[ppid] = val.(StringPair)
-			}
-
-			proplen -= (4 + len(val.(StringPair).k) + len(val.(StringPair).v))
-
-		case Binary_Data:
-			props[ppid] = val.([]byte)
-			proplen -= (2 + len(val.(byte)))
+		err = this.SetProperty(t, ppid, val)
+		if err {
+			logger.Error(err.Error())
+			return err
 		}
+		proplen -= GetPropertyLength(pptype, val)
 	}
 
-	return ppros, 0, nil
+	return nil
 }
 
 func ReadPropVal(r io.Reader, pptype byte) (interface{}, error) {
@@ -307,35 +336,35 @@ func ReadPropVal(r io.Reader, pptype byte) (interface{}, error) {
 	return v, err
 }
 
-func PackProps(t byte, props map[uint32]interface{}) ([]byte, error) {
+func (this *PropertySet) PackProps(t PKType) []byte {
 	wbuff := bytes.NewBuffer([]byte{})
 
-	for ppid, val := range props {
-		dup := DupAllowedProperty(ppid, t)
+	for id, val := range this.props {
+		dup := MultiAllowedProperty(id, t)
 		if dup {
-			err := WriteDupProp(wbuff, ppid, val)
+			err := WriteMultiProp(wbuff, id, val)
 			if err != nil {
-				return nil, err
+				return nil
 			}
 		} else {
-			err := WriteProp(wbuff, ppid, val)
+			err := WriteProp(wbuff, id, val)
 			if err != nil {
-				return nil, err
+				return nil
 			}
  	    }
 	}
 
-	return wbuff.Bytes(), nil
+	return wbuff.Bytes()
 }
 
-func WriteProp(w io.Writer, ppid uint32, v interface{}) error {
-	pptype, err := GetPropertyType(ppid)
+func WriteProp(w io.Writer, id PropertyID, v PropertyValue) error {
+	pptype, err := GetPropertyType(id)
 	if err != nil {
 		return err
 	}
 
 	// write property ID 
-	err = WriteUvarint(w, ppid)
+	err = WriteUvarint(w, id)
 	if err != nil {
 		return err
 	}
@@ -344,22 +373,16 @@ func WriteProp(w io.Writer, ppid uint32, v interface{}) error {
 	switch pptype {
 	case One_Byte:
 		err = WriteByte(w, v.(byte))
-
 	case Two_Byte_Integer:
 		err = WriteUint16(w, v.(uint16))
-
 	case Four_Byte_Integer:
 		err = WriteUint32(w, v.(uint32))
-
 	case Variable_Byte_Integer:
 		err = WriteUvarint(w, v.(uint32))
-
 	case UTF8_String:
 		err = WriteString(w, v.(string))
-
 	case UTF8_String_Pair:
 		err = WriteStringPair(w, v.(StringPair))
-
 	case Binary_Data:
 		err = WriteBinaryData(w, v.([]byte))
 	}
@@ -367,42 +390,38 @@ func WriteProp(w io.Writer, ppid uint32, v interface{}) error {
 	return err
 }
 
-func WriteDupProp(w io.Writer, ppid uint32, v interface{}) error {
-	pptype, err := GetPropertyType(ppid)
-	if err != nil {
-		return err
-	}
-
-	if ppid != Subscription_Identifier && ppid != User_Property {
-		return errors.New(fmt.Sprintf("Not allow duplicate. Property ID: 0x%04X", ppid))
-	}
-
-	if ppid == Subscription_Identifier { //  Variable_Byte_Integer
-		for i, vi := range v.([]uint32) {
-			// write property id
-			err = WriteUvarint(w, ppid)
+func WriteMultiProp(w io.Writer, id PropertyID, v PropertyValue) error {
+	var err error
+	if id == Subscription_Identifier { // Variable_Byte_Integer
+		for i, val := range v.([]uint32) {
+			// write property ID
+			err = WriteUvarint(w, id)
 			if err != nil {
 				return err
 			}
 			// write property value
-			err = WriteUvarint(w, vi)
+			err = WriteUvarint(w, val)
 			if err != nil {
 				return err
 			}
 		} 
-	} else { // User_Property
-		for i, vi := range v.([]StringPair) {
+	} else if id == User_Property { // UTF8_String_pair
+		for i, val := range v.([]StringPair) {
 			// write property id
-			err = WriteUvarint(w, ppid)
+			err = WriteUvarint(w, id)
 			if err != nil {
 				return err
 			}
-			// write property id
-			err = WriteStringPair(w, vi)
+			// write property value
+			err = WriteStringPair(w, val)
 			if err != nil {
 				return err
 			}
 		} 
+	} else {
+		err = errors.New(fmt.Sprintf("Not allow duplicate. Property ID: 0x%04X", id))
+		logger.Error(err.Error())
+		return err
 	}
 
 	return nil

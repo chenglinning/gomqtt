@@ -3,17 +3,6 @@ package mqttp
 // ReasonCode contains return codes across all MQTT specs
 type ReasonCode byte
 
-// CodeIssuer who is message issuer
-type CodeIssuer byte
-
-// nolint: golint
-const (
-	CodeIssuerServer CodeIssuer = 0x00
-	CodeIssuerClient
-	CodeIssuerBoth
-	CodeIssuerInvalid
-)
-
 // nolint: golint                                            // V3.1.1  \  V5.0
 const ( // /////////////////////////////////////////////////////   |    \    |
 	CodeSuccess                            ReasonCode = 0x00 //    |    \    |
@@ -63,133 +52,129 @@ const ( // /////////////////////////////////////////////////////   |    \    |
 	CodeWildcardSubscriptionsNotSupported  ReasonCode = 0xA2 //         \ <--|
 )
 
-var packetTypeCodeMap = map[Type]map[ReasonCode]struct {
-	iss  CodeIssuer
-	desc string
-}{
+var packetTypeCodeMap = map[PKType]map[ReasonCode] bool {
+{
 	CONNACK: {
-		CodeSuccess:                            {iss: CodeIssuerServer, desc: "The Connection is accepted"},
-		CodeRefusedUnacceptableProtocolVersion: {iss: CodeIssuerClient, desc: "The Server does not support the level of the MQTT protocol requested by the Client"},
-		CodeRefusedIdentifierRejected:          {iss: CodeIssuerClient, desc: "The Client identifier is not allowed"},
-		CodeRefusedServerUnavailable:           {iss: CodeIssuerClient, desc: "Server refused connection"},
-		CodeRefusedBadUsernameOrPassword:       {iss: CodeIssuerClient, desc: "The data in the user name or password is malformed"},
-		CodeRefusedNotAuthorized:               {iss: CodeIssuerClient, desc: "The Client is not authorized to connect"},
-		CodeUnspecifiedError:                   {iss: CodeIssuerServer, desc: "The Server does not wish to reveal the reason for the failure, or none of the other Return Codes apply"},
-		CodeMalformedPacket:                    {iss: CodeIssuerServer, desc: "Data within the CONNECT Packet was not consistent with this specification"},
-		CodeImplementationSpecificError:        {iss: CodeIssuerServer, desc: "The CONNECT is valid but is not accepted by this Server"},
-		CodeUnsupportedProtocol:                {iss: CodeIssuerServer, desc: "The Server does not support the level of the MQTT protocol requested by the Client"},
-		CodeInvalidClientID:                    {iss: CodeIssuerServer, desc: "The Client Identifier is a valid string but is not allowed by the Server"},
-		CodeBadUserOrPassword:                  {iss: CodeIssuerServer, desc: "The Server does not accept the username or password specified by the Client"},
-		CodeNotAuthorized:                      {iss: CodeIssuerServer, desc: "The Client is not authorized to connect"},
-		CodeServerUnavailable:                  {iss: CodeIssuerServer, desc: "The MQTT Server is not available"},
-		CodeServerBusy:                         {iss: CodeIssuerServer, desc: "The Server is busy. Try again later"},
-		CodeBanned:                             {iss: CodeIssuerServer, desc: "This Client has been banned by administrative action. Contact the server administrator"},
-		CodeBadAuthMethod:                      {iss: CodeIssuerServer, desc: "The authentication method is not supported or does not match the authentication method currently in use"},
-		CodeInvalidTopicName:                   {iss: CodeIssuerServer, desc: "The Will Topic Name is not malformed, but is not accepted by this Server"},
-		CodePacketTooLarge:                     {iss: CodeIssuerServer, desc: "The Accept Packet exceeded the maximum permissible size"},
-		CodeQuotaExceeded:                      {iss: CodeIssuerServer, desc: "An implementation or administrative imposed limit has been exceeded"},
-		CodeRetainNotSupported:                 {iss: CodeIssuerServer, desc: "The Server does not support retained messages, and Will Retain was set to 1"},
-		CodeNotSupportedQoS:                    {iss: CodeIssuerServer, desc: "The Server does not support the QoS set in Will QoS"},
-		CodeUseAnotherServer:                   {iss: CodeIssuerServer, desc: "The Client should temporarily use another server"},
-		CodeServerMoved:                        {iss: CodeIssuerServer, desc: "The Client should permanently use another server"},
-		CodeConnectionRateExceeded:             {iss: CodeIssuerServer, desc: "The connection rate limit has been exceeded"},
+		CodeSuccess:                            true,
+		CodeRefusedUnacceptableProtocolVersion: true,
+		CodeRefusedIdentifierRejected:          true,
+		CodeRefusedServerUnavailable:           true,
+		CodeRefusedBadUsernameOrPassword:       true,
+		CodeRefusedNotAuthorized:               true,
+		CodeUnspecifiedError:                   true,
+		CodeMalformedPacket:                    true,
+		CodeImplementationSpecificError:        true,
+		CodeUnsupportedProtocol:                true,
+		CodeInvalidClientID:                    true,
+		CodeBadUserOrPassword:                  true,
+		CodeNotAuthorized:                      true,
+		CodeServerUnavailable:                  true,
+		CodeServerBusy:                         true,
+		CodeBanned:                             true,
+		CodeBadAuthMethod:                      true,
+		CodeInvalidTopicName:                   true,
+		CodePacketTooLarge:                     true,
+		CodeQuotaExceeded:                      true,
+		CodeRetainNotSupported:                 true,
+		CodeNotSupportedQoS:                    true,
+		CodeUseAnotherServer:                   true,
+		CodeServerMoved:                        true,
+		CodeConnectionRateExceeded:             true,
 	},
+
 	PUBACK: {
-		CodeSuccess:                     {iss: CodeIssuerBoth, desc: "The message is accepted. Publication of the QoS 1 message proceeds"},
-		CodeNoMatchingSubscribers:       {iss: CodeIssuerBoth, desc: "The message is accepted but there are no subscribers"},
-		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The receiver does not accept the publish but either does not want to reveal the reason, or it does not match one of the other values"},
-		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The PUBLISH is valid but the receiver is not willing to accept it"},
-		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The PUBLISH is not authorized"},
-		CodeInvalidTopicName:            {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
-		CodeQuotaExceeded:               {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
-		CodeInvalidPayloadFormat:        {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified in the Payload Format Indicator"},
+		CodeSuccess:                     true,
+		CodeNoMatchingSubscribers:       true,
+		CodeUnspecifiedError:            true,
+		CodeImplementationSpecificError: true,
+		CodeNotAuthorized:               true,
+		CodeInvalidTopicName:            true,
+		CodeQuotaExceeded:               true,
+		CodeInvalidPayloadFormat:        true,
 	},
+
 	PUBREC: {
-		CodeSuccess:                     {iss: CodeIssuerBoth, desc: "The message is accepted. Publication of the QoS 2 message proceeds"},
-		CodeNoMatchingSubscribers:       {iss: CodeIssuerBoth, desc: "The message is accepted but there are no subscribers"},
-		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The receiver does not accept the publish but either does not want to reveal the reason, or it does not match one of the other values"},
-		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The PUBLISH is valid but the receiver is not willing to accept it"},
-		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The PUBLISH is not authorized"},
-		CodeInvalidTopicName:            {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
-		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The IDType is already in use. Possible mismatch in the session state between the Client and Server"},
-		CodeQuotaExceeded:               {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
-		CodeInvalidPayloadFormat:        {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified in the Payload Format Indicator"},
+		CodeSuccess:                     true,
+		CodeNoMatchingSubscribers:       true,
+		CodeUnspecifiedError:            true,
+		CodeImplementationSpecificError: true,
+		CodeNotAuthorized:               true,
+		CodeInvalidTopicName:            true,
+		CodePacketIDInUse:               true,
+		CodeQuotaExceeded:               true,
+		CodeInvalidPayloadFormat:        true,
 	},
+
 	PUBREL: {
-		CodeSuccess:          {iss: CodeIssuerBoth, desc: "Message released. Publication of QoS 2 message is complete"},
-		CodePacketIDNotFound: {iss: CodeIssuerBoth, desc: "The IDType is not known. Possible a mismatch between the Session state on the Client and Server"},
+		CodeSuccess:          true,
+		CodePacketIDNotFound: true,
 	},
+	
 	PUBCOMP: {
-		CodeSuccess:          {iss: CodeIssuerBoth, desc: "Message released. Publication of QoS 2 message is complete"},
-		CodePacketIDNotFound: {iss: CodeIssuerBoth, desc: "The IDType is not known. Possible a mismatch between the Session state on the Client and Server"},
+		CodeSuccess:          true,
+		CodePacketIDNotFound: true,
 	},
+
 	SUBACK: {
-		0:                                     {iss: CodeIssuerBoth, desc: "The subscription is accepted and the maximum QoS sent will be QoS 0. This might be a lower QoS than was requested"}, // Maximum QoS 0
-		1:                                     {iss: CodeIssuerBoth, desc: "The subscription is accepted and the maximum QoS sent will be QoS 1. This might be a lower QoS than was requested"}, // Maximum QoS 1
-		2:                                     {iss: CodeIssuerBoth, desc: "The subscription is accepted and any received QoS will be sent to this subscription"},                               // Maximum QoS 2
-		CodeUnspecifiedError:                  {iss: CodeIssuerBoth, desc: "The subscription is not accepted and the Server either does not wish to reveal the reason or none of the other Return Codes apply"},
-		CodeImplementationSpecificError:       {iss: CodeIssuerBoth, desc: "The SUBSCRIBE is valid but the Server does not accept i"},
-		CodeNotAuthorized:                     {iss: CodeIssuerBoth, desc: "The Client is not authorized to make this subscription"},
-		CodeInvalidTopicFilter:                {iss: CodeIssuerBoth, desc: "The Topic Filter is correctly formed but is not allowed for this client"},
-		CodePacketIDInUse:                     {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
-		CodeQuotaExceeded:                     {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
-		CodeSharedSubscriptionNotSupported:    {iss: CodeIssuerBoth, desc: "The Server does not support shared subscriptions for this Client"},
-		CodeSubscriptionIDNotSupported:        {iss: CodeIssuerBoth, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
-		CodeWildcardSubscriptionsNotSupported: {iss: CodeIssuerBoth, desc: "The Server does not support Wildcard subscription; the subscription is not accepted"},
+		QoS0:                                  true,  // QoS 0
+		QoS1:                                  true,  // QoS 1
+		QoS2:                                  true,  // QoS 2
+		CodeUnspecifiedError:                  true,
+		CodeImplementationSpecificError:       true,
+		CodeNotAuthorized:                     true,
+		CodeInvalidTopicFilter:                true,
+		CodePacketIDInUse:                     true,
+		CodeQuotaExceeded:                     true,
+		CodeSharedSubscriptionNotSupported:    true,
+		CodeSubscriptionIDNotSupported:        true,
+		CodeWildcardSubscriptionsNotSupported: true,
 	},
+
 	UNSUBACK: {
-		CodeSuccess:                     {iss: CodeIssuerBoth, desc: "The subscription is deleted"},
-		CodeNoSubscriptionExisted:       {iss: CodeIssuerBoth, desc: "No matching subscription existed"},
-		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The unsubscribe could not be completed and the Server either does not wish to reveal the reason or none of the other Return Codes apply"},
-		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The UNSUBSCRIBE is valid but the Server does not accept it"},
-		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The client is not authorized to unsubscribe"},
-		CodeInvalidTopicFilter:          {iss: CodeIssuerBoth, desc: "The topic filter is correctly formed but is not allowed for this client"},
-		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
+		CodeSuccess:                     true,
+		CodeNoSubscriptionExisted:       true,
+		CodeUnspecifiedError:            true,
+		CodeImplementationSpecificError: true,
+		CodeNotAuthorized:               true,
+		CodeInvalidTopicFilter:          true,
+		CodePacketIDInUse:               true,
 	},
+
 	DISCONNECT: {
-		CodeSuccess:                           {iss: CodeIssuerClient, desc: "Close the connection normally. Do not send the Will Message"},
-		CodeRefusedBadUsernameOrPassword:      {iss: CodeIssuerClient, desc: "The client wishes to disconnect but requires that the Server also publishes its Will message"},
-		CodeUnspecifiedError:                  {iss: CodeIssuerBoth, desc: "The Connection is closed but the sender either does not wish to reveal the reason, or none of the other Return Codes apply"},
-		CodeMalformedPacket:                   {iss: CodeIssuerBoth, desc: "The received packet does not conform to this specification"},
-		CodeProtocolError:                     {iss: CodeIssuerBoth, desc: "An unexpected or out of order packet was received"},
-		CodeImplementationSpecificError:       {iss: CodeIssuerBoth, desc: "The packet received is valid but cannot be processed by this implementation"},
-		CodeNotAuthorized:                     {iss: CodeIssuerServer, desc: "The request is not authorized"},
-		CodeServerBusy:                        {iss: CodeIssuerServer, desc: "The Server is busy and cannot continue processing this Client"},
-		CodeServerShuttingDown:                {iss: CodeIssuerServer, desc: "The Server is shutting down"},
-		CodeKeepAliveTimeout:                  {iss: CodeIssuerServer, desc: "The Connection is closed because no Packet has been received for 1.5 times the Keep alive time"},
-		CodeSessionTakenOver:                  {iss: CodeIssuerServer, desc: "Another Connection using the same ClientId has connected causing this Connection to be closed"},
-		CodeInvalidTopicFilter:                {iss: CodeIssuerServer, desc: "The topic filter is valid, but is not accepted"},
-		CodeInvalidTopicName:                  {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
-		CodePacketTooLarge:                    {iss: CodeIssuerBoth, desc: "The packet size is too large"},
-		CodeReceiveMaximumExceeded:            {iss: CodeIssuerBoth, desc: "The Client or Server has received more than Receive Maximum publication for which it has not sent PUBACK or PUBCOMP"},
-		CodeInvalidTopicAlias:                 {iss: CodeIssuerBoth, desc: "Invalid topic alias"},
-		CodeMessageRateTooHigh:                {iss: CodeIssuerBoth, desc: "The rate of publish is too high"},
-		CodeQuotaExceeded:                     {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
-		CodeAdministrativeAction:              {iss: CodeIssuerBoth, desc: "The Connection is closed due to an administrative action"},
-		CodeInvalidPayloadFormat:              {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified by the Payload Format Indicator"},
-		CodeRetainNotSupported:                {iss: CodeIssuerServer, desc: "The Server has does not support retained messages"},
-		CodeNotSupportedQoS:                   {iss: CodeIssuerServer, desc: "The Client specified a QoS greater then the QoS specified in a Maximum QoS in the CONNACK"},
-		CodeUseAnotherServer:                  {iss: CodeIssuerServer, desc: "The Client should temporarily change its Server"},
-		CodeServerMoved:                       {iss: CodeIssuerServer, desc: "The Server is moved and the client should permanently change its server location"},
-		CodeSharedSubscriptionNotSupported:    {iss: 0, desc: ""},
-		CodeConnectionRateExceeded:            {iss: 0, desc: ""},
-		CodeMaximumConnectTime:                {iss: CodeIssuerServer, desc: "The maximum connection time authorized for this connection has been exceeded"},
-		CodeSubscriptionIDNotSupported:        {iss: CodeIssuerServer, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
-		CodeWildcardSubscriptionsNotSupported: {iss: CodeIssuerServer, desc: "The Server does not support Wildcard subscription; the subscription is not accepted"},
+		CodeSuccess:                           true,
+		CodeRefusedBadUsernameOrPassword:      true,
+		CodeUnspecifiedError:                  true,
+		CodeMalformedPacket:                   true,
+		CodeProtocolError:                     true,
+		CodeImplementationSpecificError:       true,
+		CodeNotAuthorized:                     true,
+		CodeServerBusy:                        true,
+		CodeServerShuttingDown:                true,
+		CodeKeepAliveTimeout:                  true,
+		CodeSessionTakenOver:                  true,
+		CodeInvalidTopicFilter:                true,
+		CodeInvalidTopicName:                  true,
+		CodePacketTooLarge:                    true,
+		CodeReceiveMaximumExceeded:            true,
+		CodeInvalidTopicAlias:                 true,
+		CodeMessageRateTooHigh:                true,
+		CodeQuotaExceeded:                     true,
+		CodeAdministrativeAction:              true,
+		CodeInvalidPayloadFormat:              true,
+		CodeRetainNotSupported:                true,
+		CodeNotSupportedQoS:                   true,
+		CodeUseAnotherServer:                  true,
+		CodeServerMoved:                       true,
+		CodeSharedSubscriptionNotSupported:    true,
+		CodeConnectionRateExceeded:            true,
+		CodeMaximumConnectTime:                true,
+		CodeSubscriptionIDNotSupported:        true,
+		CodeWildcardSubscriptionsNotSupported: true,
 	},
 	AUTH: {
-		CodeSuccess: {
-			iss:  CodeIssuerServer,
-			desc: "Authentication is successful",
-		},
-		CodeContinueAuthentication: {
-			iss:  CodeIssuerBoth,
-			desc: "Continue the authentication with another step",
-		},
-		CodeReAuthenticate: {
-			iss:  CodeIssuerClient,
-			desc: "Initiate a re-authentication",
-		},
+		CodeSuccess: true,
+		CodeContinueAuthentication: true,
+		CodeReAuthenticate: true,
 	},
 }
 
@@ -241,20 +226,6 @@ var codeDescMap = map[ReasonCode]string{
 	CodeWildcardSubscriptionsNotSupported:  "Wildcard Subscriptions not supported",
 }
 
-// PacketTypeDir check direction of packet type
-func (c ReasonCode) PacketTypeDir(p Type) (CodeIssuer, error) {
-	pT, ok := packetTypeCodeMap[p]
-	if !ok {
-		return CodeIssuerInvalid, ErrInvalidMessageType
-	}
-
-	if issuer, kk := pT[c]; kk {
-		return issuer.iss, ErrInvalidReturnCode
-	}
-
-	return CodeIssuerInvalid, nil
-}
-
 // Value convert reason code to byte type
 func (c ReasonCode) Value() byte {
 	return byte(c)
@@ -275,24 +246,18 @@ func (c ReasonCode) IsValidV3() bool {
 
 // IsValidV5 check either reason code is valid for MQTT V5.0 or not
 func (c ReasonCode) IsValidV5() bool {
-	if c == CodeSuccess || (c >= CodeNoMatchingSubscribers && c <= CodeWildcardSubscriptionsNotSupported) {
-		return true
-	}
-	return false
+	return ( c == CodeSuccess || (c >= CodeNoMatchingSubscribers && c <= CodeWildcardSubscriptionsNotSupported) )
 }
 
 // IsValidForType check either reason code is valid for giver packet type
-func (c ReasonCode) IsValidForType(p Type) bool {
-	pT, ok := packetTypeCodeMap[p]
-	if !ok {
-		return false
+func (c ReasonCode) IsValidForType(t PKType) bool {
+	pT, ok := packetTypeCodeMap[t]
+	if ok {
+		if _, ok = pT[c]; ok {
+			return true
+		}
 	}
-
-	if _, ok = pT[c]; !ok {
-		return false
-	}
-
-	return true
+	return false
 }
 
 // Error returns the description of the ReturnCode
@@ -300,9 +265,9 @@ func (c ReasonCode) Error() string {
 	if s, ok := codeDescMap[c]; ok {
 		return s
 	}
-
 	return "Unknown error"
 }
+
 
 // Desc return code description
 func (c ReasonCode) Desc() string {

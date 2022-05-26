@@ -1,5 +1,4 @@
 package mqttp
-
 const (
 	maskMessageFlags               byte = 0x0F
 	maskConnFlagUsername           byte = 0x80
@@ -18,6 +17,7 @@ const (
 	maskSubscriptionRetainHandling byte = 0x30
 	maskSubscriptionReservedV3     byte = 0xFC
 	maskSubscriptionReservedV5     byte = 0xC0
+	maskSessionPresent             byte = 0x01
 )
 
 const (

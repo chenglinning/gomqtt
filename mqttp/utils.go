@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"regexp"
+	"unicode/utf8"
+
 )
 const (
 	MAX_UINT uint64 = 268435455
@@ -107,8 +111,8 @@ func ReadByte(r io.Reader) (byte, error) {
 	_, err := w.Write(buff)
 	return err
 }
- 
- func ReadStingPair(r io.Reader) (StringPair, error) {
+
+func ReadStingPair(r io.Reader) (StringPair, error) {
 	key, err := ReadSting(r)
 	if err != nil {
 		return nil, err
@@ -150,6 +154,37 @@ func WriteUvarint(w io.Writer, n uint32) error {
 	}
 	m := binary.PutUvarint(buff, uint64(n))
 	m, err := w.Write(buff[:m])
+	return err
+}
+
+func ReadUTF8String(r io.Reader) ([]byte, error) {
+	n, err := ReadUint16(r)
+	if err != nil {
+		return nil, err
+	}
+	buff := make([]byte, n)
+	_, err := io.ReadFull(r, buff)
+	if err != nil {
+		return nil, err
+	}
+
+	if !utf8.Valid(buff) || !BasicUTFRegexp.Match(buff) {
+		return nil, errors.New("Invalid UTF8 encode")
+	}
+
+	return buff, nil
+ }
+
+ func WriteUTF8String(w io.Writer, buff []byte) error {
+	if !utf8.Valid(buff) || !BasicUTFRegexp.Match(buff) {
+		return errors.New("Invalid UTF8 encode")
+	}
+	n := (len(buff))
+	err := WriteUint16(w, uint16(n))
+	if err != nil {
+		return err
+	}
+	_, err := w.Write(buff)
 	return err
 }
 
@@ -200,3 +235,11 @@ func vlen(u uint32) int {
 	}
 	return 0
 }
+
+func ReadRestData(r io.Reader) ([]byte, error) {
+	rest_data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return rest_data, nil
+ }

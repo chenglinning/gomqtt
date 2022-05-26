@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "..\\..\\skmqtt"
+		},
+		{
+			"path": "..\\..\\skome"
+		}
+	],
+	"settings": {}
+}

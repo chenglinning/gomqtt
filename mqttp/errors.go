@@ -50,7 +50,7 @@ const (
 	ErrInvalidArgs
 	ErrInvalidUtf8
 	ErrNotSupported
-	ErrProtocolInvalidName
+	ErrINvalidProtocolName
 )
 
 // Error returns the corresponding error string for the ConnAckCode
@@ -100,8 +100,10 @@ func (e Error) Error() string {
 		return "Invalid arguments"
 	case ErrInvalidUtf8:
 		return "String is not UTF8"
-	case ErrInvalidProtocolVersion:
+	case ErrInvalidProtocolName:
 		return "Invalid protocol name"
+	case ErrInvalidProtocolVersion:
+		return "Invalid protocol level"
 	}
 
 	return "Unknown error"

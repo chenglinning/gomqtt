@@ -6,47 +6,30 @@ import (
 	"fmt"
 	"io"
 )
-const (
-	maskMessageFlags               byte = 0x0F
-	maskConnFlagUsername           byte = 0x80
-	maskConnFlagPassword           byte = 0x40
-	maskConnFlagWillRetain         byte = 0x20
-	maskConnFlagWillQos            byte = 0x18
-	maskConnFlagWill               byte = 0x04
-	maskConnFlagClean              byte = 0x02
-	maskConnFlagReserved           byte = 0x01
-	maskPublishFlagRetain          byte = 0x01
-	maskPublishFlagQoS             byte = 0x06
-	maskPublishFlagDup             byte = 0x08
-	maskSubscriptionQoS            byte = 0x03
-	maskSubscriptionNL             byte = 0x04
-	maskSubscriptionRAP            byte = 0x08
-	maskSubscriptionRetainHandling byte = 0x30
-	maskSubscriptionReservedV3     byte = 0xFC
-	maskSubscriptionReservedV5     byte = 0xC0
-)
 
 // FixedHeader is a struct to hold the decoded information from
 // the fixed header of an MQTT ControlPacket
 type Header struct {
 	version    byte
-	ptype 	   byte
+	ptype 	   PKType
 	pid		   uint16
 	dup        bool
 	qos        byte
 	retain     bool
-	remLen	   int32
-	props      map[uint32]interface{}
-	willProps  map[uint32]interface{}
+	
+//	remLen	   int32
+	propset      *PropertySet
+	willpropset  *PropertySet
+
 }
 
 // Type returns the Packet Type 
-func (h *Header) GetType() byte {
+func (h *Header) GetType() PKType {
 	return h.ptype
 }
 
 // Set the Packet Type 
-func (h *Header) SetType(t byte) {
+func (h *Header) SetType(t PKType) {
 	h.pktype = t
 }
 
@@ -100,23 +83,13 @@ func (h *Header) SetRetain(b bool) {
 	h.retain = b
 }
 
-// Type returns the Packet Remain Length
-func (h *Header) GetRemLen() int32 {
-	return h.remLen
-}
-
-// Set the Packet Remain Length 
-func (h *Header) SetRemLen(l int32) {
-	h.remLen = l
-}
-
 // Type returns the Packet fixed header flags byte
 func (h *Header) GetFixedHeaderFirstByte() byte {
-	return (h.ptype<<4 | boolToByte(h.dup)<<3 | h.qos<<1 | boolToByte(h.retain))
+	return (h.ptype.ToByte()<<4 | boolToByte(h.dup)<<3 | h.qos<<1 | boolToByte(h.retain))
 }
 
-// Set the Packet fixed header flags byte
-func (h *Header) SetFlags(flags byte) {
+// Parse the Packet fixed header flags byte
+func (h *Header) ParseFlags(flags byte) {
 	h.dup = flags & maskDup > 0
 	h.qos = flags & maskQos >> 1
 	h.retain = flags & maskRetain > 0
@@ -124,10 +97,81 @@ func (h *Header) SetFlags(flags byte) {
 
 // Reset Properties
 func (h *Header) ResetProps() {
-	h.props = make(map[uint32]interface{})
+	h.propset = &PropertySet{ props: make(PropertyMap) }
 }
 
 // Reset Will Properties
 func (h *Header) ResetWillProps() {
-	h.willProps = make(map[uint32]interface{})
+	h.willpropset = &PropertySet{ props: make(PropertyMap) }
+}
+
+// Pack Props 
+func (h *Header) WriterProps(w io.Writer) error {
+	packBytes := h.propset.PackProps(h.ptype)
+	if packBytes == nil {
+		return errors.New(fmt.Sprintf("There is no property (packet type: 0x%d)", h.ptype))
+	}
+
+	pplen := len(packBytes)
+	// write property lenght
+	err := WriteUvarint(w, uint32(pplen))
+	if err != nil {
+		return err
+	}
+
+	// write property payload
+	_, err := w.Write(packBytes)
+
+	return err
+}
+
+// Pack Will Props 
+func (h *Header) WriteWillProps(w io.Writer) error {
+	packBytes := h.willpropset.PackProps(h.ptype)
+	if package == nil {
+		return errors.New(fmt.Sprintf("There is no property (packet type: 0x%d)", h.ptype))
+	}
+
+	pplen := len(packBytes)
+	// write property lenght
+	err := WriteUvarint(w, uint32(pplen))
+	if err != nil {
+		return err
+	}
+
+	// write property payload
+	_, err := w.Write(packBytes)
+
+	return err
+
+}
+
+// Unpack Props
+func (h *Header) ReadProps(r io.Reader) error {
+	h.ResetProps()
+	err := h.propset.UnpackProps(r, h.ptype) 
+	return err
+}
+
+// Unpack Will Props
+func (h *Header) ReadWillProps(r io.Reader) error {
+	h.ResetWillProps()
+	err := h.willpropset.UnpackProps(r, h.ptype) 
+	return err
+}
+
+func (h *Header) SubOpsValid(ops byte) bool {
+	if h.version == MQTT311 {
+		return ops & maskSubscriptionReservedV3 < 3
+	}
+	if ops & maskSubscriptionReservedV5 > 0 {
+		return false
+	}
+	if ops & maskSubscriptionQoS == 3 {
+		return false
+	}
+	if (ops & maskSubscriptionRetainHandling>>4) == 3 {
+		return false
+	}
+    return true
 }
